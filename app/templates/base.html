@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Stock News Digest{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+    <nav class="bg-white shadow-sm border-b border-gray-200">
+        <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+            <a href="{% if username is defined and username %}/{{ username }}{% else %}/{% endif %}" class="text-xl font-bold text-indigo-600">Stock News Digest</a>
+            <div class="flex items-center gap-4">
+                {% if username is defined and username %}
+                <a href="/{{ username }}" class="text-sm text-gray-600 hover:text-indigo-600 transition">Dashboard</a>
+                <a href="/{{ username }}/calendar" class="text-sm text-gray-600 hover:text-indigo-600 transition flex items-center gap-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                    </svg>
+                    Calendar
+                </a>
+                <span class="text-gray-300">|</span>
+                <span class="text-sm text-gray-500">{{ username }}</span>
+                <a href="/" class="text-sm text-gray-400 hover:text-gray-600">Switch user</a>
+                {% else %}
+                <span class="text-sm text-gray-500">Cached news for tracked stocks</span>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+    <main class="max-w-6xl mx-auto px-4 py-6">
+        {% block content %}{% endblock %}
+    </main>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

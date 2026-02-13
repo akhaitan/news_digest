@@ -1,0 +1,1104 @@
+{% extends "base.html" %}
+{% block title %}{{ username }}'s Dashboard — Stock News Digest{% endblock %}
+{% block content %}
+<!-- Error banner (hidden by default, shown by JS on refresh errors) -->
+<div id="error-banner" class="hidden mb-4">
+    <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+        <div class="flex items-start justify-between">
+            <div class="flex items-start gap-3">
+                <svg class="w-5 h-5 text-red-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+                </svg>
+                <div>
+                    <p class="text-sm font-medium text-red-800">Some data sources returned errors</p>
+                    <p class="text-xs text-red-600 mt-0.5">Cached data has been preserved for affected tickers.</p>
+                    <ul id="error-list" class="mt-2 text-xs text-red-700 space-y-1 list-disc list-inside"></ul>
+                </div>
+            </div>
+            <button onclick="dismissErrorBanner()" class="text-red-400 hover:text-red-600 p-1 shrink-0" title="Dismiss">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Refresh Progress Panel -->
+<div id="refresh-progress" class="hidden mb-4">
+    <div class="bg-white border border-indigo-200 rounded-lg shadow-sm overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2.5 bg-indigo-50 border-b border-indigo-100">
+            <div class="flex items-center gap-2">
+                <svg id="progress-spinner" class="w-4 h-4 text-indigo-600 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <svg id="progress-done-icon" class="w-4 h-4 text-green-600 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <h3 id="progress-title" class="text-sm font-semibold text-gray-700"></h3>
+            </div>
+            <button id="progress-close-btn" onclick="closeProgress()" class="hidden text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100" title="Close &amp; reload">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+        <div id="progress-tickers" class="px-4 py-3 flex flex-wrap gap-2 items-start"></div>
+    </div>
+</div>
+
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold">{{ username }}'s Dashboard</h1>
+    <div class="flex items-center gap-2">
+        <button id="refresh-news-btn" onclick="refreshNews()"
+            class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center gap-2 text-sm">
+            <svg id="refresh-news-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            <span id="refresh-news-text">Refresh News</span>
+        </button>
+        <button id="refresh-events-btn" onclick="refreshEvents()"
+            class="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 transition flex items-center gap-2 text-sm">
+            <svg id="refresh-events-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+            </svg>
+            <span id="refresh-events-text">Refresh Events</span>
+        </button>
+    </div>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+    <div class="flex items-center justify-between mb-1">
+        <label class="block text-sm font-medium text-gray-700">Add stocks to watchlist</label>
+        <button type="button" id="mode-toggle" onclick="toggleAddMode()"
+                class="text-xs text-indigo-600 hover:text-indigo-800 transition font-medium">
+            Bulk add
+        </button>
+    </div>
+
+    <!-- Single-add mode -->
+    <div id="single-mode">
+        <form id="add-stock-form" action="/{{ username }}/add" method="post" class="flex gap-3 items-start">
+            <div class="flex-1 relative">
+                <input type="text" id="stock-search" autocomplete="off"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                       placeholder="Search by ticker or company name...">
+                <input type="hidden" id="ticker-hidden" name="ticker" required>
+                <div id="ac-dropdown" class="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto hidden"></div>
+            </div>
+            <button type="submit" id="add-btn"
+                    class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled>
+                Add
+            </button>
+        </form>
+        <p id="ac-error" class="text-xs text-red-500 mt-1 hidden">Please select a stock from the suggestions.</p>
+    </div>
+
+    <!-- Bulk-add mode -->
+    <div id="bulk-mode" class="hidden">
+        <div class="flex gap-3 items-start">
+            <div class="flex-1">
+                <textarea id="bulk-input" rows="5"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-mono"
+                    placeholder="Enter one stock per line, e.g.:&#10;AAPL&#10;MSFT&#10;Google&#10;AMZN&#10;Walmart"></textarea>
+                <p class="text-xs text-gray-400 mt-1">Accepts ticker symbols or company names — one per line</p>
+            </div>
+            <button type="button" id="bulk-add-btn" onclick="submitBulk()"
+                    class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
+                Add All
+            </button>
+        </div>
+        <div id="bulk-results" class="mt-3 hidden"></div>
+    </div>
+</div>
+
+<!-- Portfolio Digest -->
+{% if stocks %}
+<div id="digest-card" class="bg-gradient-to-br from-indigo-50 to-white rounded-lg shadow-sm border border-indigo-100 p-5 mb-6">
+    <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+            <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+            </svg>
+            Portfolio Digest
+        </h2>
+        <div class="flex items-center gap-2">
+            {% if digest %}
+            <span id="digest-meta" class="text-xs text-gray-400">
+                {{ digest.article_count }} articles · <span class="local-time" data-utc="{{ digest.generated_at }}">{{ digest.generated_at[:16] }}</span>
+            </span>
+            {% endif %}
+            <button id="digest-btn" onclick="generateDigest()"
+                class="text-sm px-3 py-1.5 rounded-lg transition flex items-center gap-1.5
+                       {% if digest %}bg-white border border-gray-200 text-gray-600 hover:bg-gray-50{% else %}bg-indigo-600 text-white hover:bg-indigo-700{% endif %}">
+                <svg id="digest-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                <span id="digest-btn-text">{{ 'Regenerate' if digest else 'Generate Digest' }}</span>
+            </button>
+        </div>
+    </div>
+    <div id="digest-content" class="text-sm text-gray-700 leading-relaxed">
+        {% if digest %}
+        <div id="digest-text" class="prose prose-sm max-w-none digest-bullets" data-raw="{{ digest.digest_text | e }}"></div>
+        {% else %}
+        <p class="text-gray-400 italic">Click "Generate Digest" to get an AI-powered summary of your portfolio news and upcoming events.</p>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if stocks %}
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 overflow-hidden">
+    <!-- Collapsible header -->
+    <button id="stocks-toggle" onclick="toggleStocks()" class="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition text-left">
+        <div class="flex items-center gap-2">
+            <svg id="stocks-chevron" class="w-4 h-4 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+            <span class="text-sm font-semibold text-gray-700">Watchlist</span>
+            <span class="bg-indigo-100 text-indigo-700 text-xs font-medium px-2 py-0.5 rounded-full">{{ stocks|length }}</span>
+        </div>
+        <div class="flex items-center gap-1.5 text-xs text-gray-400 overflow-hidden max-w-[60%]">
+            <span class="truncate">
+                {% for stock in stocks[:6] %}{{ stock.ticker }}{% if not loop.last %}, {% endif %}{% endfor %}{% if stocks|length > 6 %}, +{{ stocks|length - 6 }} more{% endif %}
+            </span>
+        </div>
+    </button>
+    <!-- Expandable grid -->
+    <div id="stocks-grid" class="hidden border-t border-gray-100">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-px bg-gray-100">
+            {% for stock in stocks %}
+            <div class="bg-white px-3 py-2.5 hover:bg-gray-50 transition relative group">
+                <div class="flex items-center justify-between">
+                    <a href="/{{ username }}/stock/{{ stock.ticker }}" class="flex items-center gap-2 flex-1 min-w-0">
+                        <span class="font-semibold text-sm">{{ stock.ticker }}</span>
+                        <span class="text-xs text-gray-400 truncate">{{ stock.name }}</span>
+                    </a>
+                    <div class="flex items-center gap-1.5 shrink-0 ml-2">
+                        {% if stock.article_count > 0 %}
+                        <span class="text-xs text-gray-500">{{ stock.article_count }}{% if stock.positive %}<span class="text-green-600 ml-0.5">↑{{ stock.positive }}</span>{% endif %}{% if stock.negative %}<span class="text-red-500 ml-0.5">↓{{ stock.negative }}</span>{% endif %}</span>
+                        {% endif %}
+                        <!-- Freshness dots -->
+                        <span title="News: {{ stock.news_ago }}" class="w-1.5 h-1.5 rounded-full inline-block {% if stock.news_freshness == 'green' %}bg-green-500{% elif stock.news_freshness == 'yellow' %}bg-yellow-400{% elif stock.news_freshness == 'red' %}bg-red-500{% else %}bg-gray-300{% endif %}"></span>
+                        <span title="Events: {{ stock.events_ago }}" class="w-1.5 h-1.5 rounded-full inline-block {% if stock.events_freshness == 'green' %}bg-green-500{% elif stock.events_freshness == 'yellow' %}bg-yellow-400{% elif stock.events_freshness == 'red' %}bg-red-500{% else %}bg-gray-300{% endif %}"></span>
+                        <form action="/{{ username }}/remove/{{ stock.ticker }}" method="post"
+                              onsubmit="return confirm('Remove {{ stock.ticker }} from your watchlist?')" class="inline">
+                            <button type="submit" class="text-gray-300 hover:text-red-500 p-0.5 rounded hover:bg-red-50 transition opacity-0 group-hover:opacity-100" title="Remove {{ stock.ticker }}">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="text-center py-12 text-gray-500">
+    <p class="text-lg">Your watchlist is empty.</p>
+    <p class="mt-2">Add a stock ticker above to get started.</p>
+</div>
+{% endif %}
+
+<!-- Upcoming Events -->
+{% if stocks %}
+{% set total_events = (events_this_week|length) + (events_next_week|length) + events_later_count %}
+<div class="mt-6 mb-6">
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <!-- Header -->
+        <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <h2 class="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+                Upcoming Events
+                {% if total_events > 0 %}
+                <span class="bg-indigo-100 text-indigo-700 text-xs font-medium px-2 py-0.5 rounded-full">{{ total_events }}</span>
+                {% endif %}
+            </h2>
+            <div class="flex items-center gap-3 text-xs text-gray-400">
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>Ex-Div</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-indigo-500 inline-block"></span>Pay</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>Split</span>
+            </div>
+        </div>
+
+        {% if total_events == 0 %}
+        <div class="px-4 py-6 text-center text-sm text-gray-400 italic">No upcoming events.</div>
+        {% else %}
+        <div class="divide-y divide-gray-50">
+            <!-- This Week -->
+            {% if events_this_week %}
+            <div class="px-4 py-2">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">This Week</p>
+                <div class="space-y-1">
+                    {% for ev in events_this_week %}
+                    <div class="flex items-center gap-2 py-1 group cursor-pointer event-row"
+                         data-title="{{ ev.title }}" data-ticker="{{ ev.ticker }}"
+                         data-type="{{ ev.event_type }}" data-date="{{ ev.event_date }}"
+                         data-description="{{ ev.description or '' }}"
+                         data-metadata="{{ ev.metadata or '' }}">
+                        <span class="w-2 h-2 rounded-full shrink-0
+                            {% if ev.event_type == 'dividend_ex' %}bg-emerald-500
+                            {% elif ev.event_type == 'dividend_pay' %}bg-indigo-500
+                            {% elif ev.event_type == 'split' %}bg-amber-500
+                            {% else %}bg-gray-400{% endif %}"></span>
+                        <span class="text-xs font-medium text-gray-500 w-16 shrink-0 event-date-local" data-date="{{ ev.event_date }}">{{ ev.event_date[5:] }}</span>
+                        <span class="text-sm font-semibold text-gray-800 w-14 shrink-0">{{ ev.ticker }}</span>
+                        <span class="text-sm text-gray-600 truncate">{{ ev.title }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Next Week -->
+            {% if events_next_week %}
+            <div class="px-4 py-2">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Next Week</p>
+                <div class="space-y-1">
+                    {% for ev in events_next_week %}
+                    <div class="flex items-center gap-2 py-1 group cursor-pointer event-row"
+                         data-title="{{ ev.title }}" data-ticker="{{ ev.ticker }}"
+                         data-type="{{ ev.event_type }}" data-date="{{ ev.event_date }}"
+                         data-description="{{ ev.description or '' }}"
+                         data-metadata="{{ ev.metadata or '' }}">
+                        <span class="w-2 h-2 rounded-full shrink-0
+                            {% if ev.event_type == 'dividend_ex' %}bg-emerald-500
+                            {% elif ev.event_type == 'dividend_pay' %}bg-indigo-500
+                            {% elif ev.event_type == 'split' %}bg-amber-500
+                            {% else %}bg-gray-400{% endif %}"></span>
+                        <span class="text-xs font-medium text-gray-500 w-16 shrink-0 event-date-local" data-date="{{ ev.event_date }}">{{ ev.event_date[5:] }}</span>
+                        <span class="text-sm font-semibold text-gray-800 w-14 shrink-0">{{ ev.ticker }}</span>
+                        <span class="text-sm text-gray-600 truncate">{{ ev.title }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Later -->
+            {% if events_later_count > 0 %}
+            <div class="px-4 py-2">
+                <p class="text-xs text-gray-400">
+                    <span class="font-semibold">{{ events_later_count }}</span> more event{{ 's' if events_later_count != 1 else '' }} beyond next week
+                </p>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Event Detail Modal -->
+<div id="event-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+    <div class="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+        <div class="flex items-start justify-between mb-4">
+            <h3 id="modal-title" class="text-lg font-bold text-gray-900"></h3>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 p-1">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+        <div class="space-y-3">
+            <div>
+                <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Ticker</span>
+                <p id="modal-ticker" class="text-sm font-semibold text-gray-800"></p>
+            </div>
+            <div>
+                <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Event Type</span>
+                <p id="modal-type" class="text-sm text-gray-800"></p>
+            </div>
+            <div>
+                <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Date</span>
+                <p id="modal-date" class="text-sm text-gray-800"></p>
+            </div>
+            <div>
+                <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Details</span>
+                <p id="modal-description" class="text-sm text-gray-800"></p>
+            </div>
+            <div id="modal-meta-section" class="hidden">
+                <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Additional Info</span>
+                <div id="modal-meta" class="text-sm text-gray-700 mt-1 space-y-1"></div>
+            </div>
+        </div>
+        <div class="mt-6 flex justify-end">
+            <button onclick="closeModal()"
+                    class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition text-sm">
+                Close
+            </button>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if articles %}
+<h2 class="text-xl font-bold mt-10 mb-4">Latest News</h2>
+<div id="articles-list" class="space-y-4">
+    {% for article in articles %}
+    {% set is_read = article.id in read_ids %}
+    <div class="article-card bg-white rounded-lg shadow-sm border border-gray-200 p-4 transition-all duration-300
+                {{ 'opacity-60' if is_read else '' }}"
+         data-article-id="{{ article.id }}" data-is-read="{{ 'true' if is_read else 'false' }}">
+        <div class="flex items-start justify-between gap-4">
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                    <span class="read-dot w-2 h-2 rounded-full shrink-0 {{ 'bg-gray-300' if is_read else 'bg-indigo-500' }}"
+                          title="{{ 'Read' if is_read else 'Unread' }}"></span>
+                    <a href="{{ article.url }}" target="_blank" rel="noopener"
+                       class="article-link text-lg font-medium hover:underline truncate
+                              {{ 'text-gray-500' if is_read else 'text-indigo-600' }}"
+                       data-article-id="{{ article.id }}">
+                        {{ article.title }}
+                    </a>
+                </div>
+                <div class="flex items-center gap-2 mt-1 text-sm text-gray-500 ml-4">
+                    <span class="font-medium text-gray-700">{{ article.ticker }}</span>
+                    <span>&middot;</span>
+                    <span>{{ article.source }}</span>
+                    {% if article.published_at %}
+                    <span>&middot;</span>
+                    <span class="local-time" data-utc="{{ article.published_at }}">{{ article.published_at[:16] }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+                {% if article.sentiment %}
+                <span class="px-2 py-1 rounded-full text-xs font-medium
+                    {% if article.sentiment == 'positive' %}bg-green-100 text-green-700
+                    {% elif article.sentiment == 'negative' %}bg-red-100 text-red-700
+                    {% else %}bg-gray-100 text-gray-600{% endif %}">
+                    {{ article.sentiment }}
+                </span>
+                {% endif %}
+                <button class="toggle-read-btn text-xs px-2 py-1 rounded border transition
+                               {{ 'border-indigo-300 text-indigo-600 hover:bg-indigo-50' if is_read else 'border-gray-300 text-gray-500 hover:bg-gray-50' }}"
+                        data-article-id="{{ article.id }}"
+                        title="{{ 'Mark as unread' if is_read else 'Mark as read' }}">
+                    {{ 'Mark unread' if is_read else 'Mark read' }}
+                </button>
+            </div>
+        </div>
+        {% if article.summary %}
+        <p class="mt-2 text-sm text-gray-700 line-clamp-3 ml-4">{{ article.summary }}</p>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<style>
+.digest-bullets p { margin: 0.35rem 0; }
+.digest-bullets strong { color: #1e293b; }
+</style>
+<script>
+// --- Portfolio Digest ---
+async function generateDigest() {
+    const btn = document.getElementById('digest-btn');
+    const btnText = document.getElementById('digest-btn-text');
+    const icon = document.getElementById('digest-icon');
+    const content = document.getElementById('digest-content');
+    const meta = document.getElementById('digest-meta');
+
+    btn.disabled = true;
+    btnText.textContent = 'Generating...';
+    icon.classList.add('animate-spin');
+
+    try {
+        const resp = await fetch('/api/digest/{{ username }}/generate', { method: 'POST' });
+        const data = await resp.json();
+
+        if (data.status === 'error') {
+            content.innerHTML = '<p class="text-red-500 text-sm">' + (data.message || 'Failed to generate digest') + '</p>';
+        } else {
+            // Render digest with markdown-like formatting
+            const formatted = formatDigest(data.digest_text);
+            content.innerHTML = '<div id="digest-text" class="prose prose-sm max-w-none digest-bullets">' + formatted + '</div>';
+
+            // Update meta
+            if (meta) {
+                meta.innerHTML = data.article_count + ' articles · just now';
+            } else {
+                // Create meta element
+                const metaEl = document.createElement('span');
+                metaEl.id = 'digest-meta';
+                metaEl.className = 'text-xs text-gray-400';
+                metaEl.innerHTML = data.article_count + ' articles · just now';
+                btn.parentNode.insertBefore(metaEl, btn);
+            }
+
+            // Update button style to "Regenerate"
+            btn.className = 'text-sm px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 bg-white border border-gray-200 text-gray-600 hover:bg-gray-50';
+            btnText.textContent = 'Regenerate';
+        }
+    } catch (e) {
+        console.error('Digest error:', e);
+        content.innerHTML = '<p class="text-red-500 text-sm">Network error. Please try again.</p>';
+    }
+
+    btn.disabled = false;
+    icon.classList.remove('animate-spin');
+}
+
+function formatDigest(text) {
+    // Convert markdown-ish text to HTML
+    return text
+        .split('\n')
+        .filter(line => line.trim())
+        .map(line => {
+            // Convert markdown links [text](url) to clickable <a> tags
+            line = line.replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g,
+                '<a href="$2" target="_blank" rel="noopener" class="text-indigo-600 hover:text-indigo-800 underline decoration-indigo-300 hover:decoration-indigo-600">$1</a>');
+            // Convert **bold** to <strong>
+            line = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            // Wrap bullet lines in <p>
+            if (/^[-•*📈📉⚖️📅]/.test(line.trim())) {
+                return '<p>' + line.trim().replace(/^[-•*]\s*/, '') + '</p>';
+            }
+            return '<p>' + line + '</p>';
+        })
+        .join('');
+}
+
+// --- Watchlist toggle ---
+function toggleStocks() {
+    const grid = document.getElementById('stocks-grid');
+    const chevron = document.getElementById('stocks-chevron');
+    const isHidden = grid.classList.contains('hidden');
+    grid.classList.toggle('hidden', !isHidden);
+    chevron.style.transform = isHidden ? 'rotate(90deg)' : '';
+}
+
+// --- Mode toggle ---
+function toggleAddMode() {
+    const singleMode = document.getElementById('single-mode');
+    const bulkMode = document.getElementById('bulk-mode');
+    const toggle = document.getElementById('mode-toggle');
+    const isBulk = bulkMode.classList.contains('hidden');
+    singleMode.classList.toggle('hidden', isBulk);
+    bulkMode.classList.toggle('hidden', !isBulk);
+    toggle.textContent = isBulk ? 'Single add' : 'Bulk add';
+    if (isBulk) document.getElementById('bulk-input').focus();
+}
+
+// --- Single Stock Autocomplete ---
+(function() {
+    const searchInput = document.getElementById('stock-search');
+    const hiddenInput = document.getElementById('ticker-hidden');
+    const dropdown = document.getElementById('ac-dropdown');
+    const addBtn = document.getElementById('add-btn');
+    const errorMsg = document.getElementById('ac-error');
+    const form = document.getElementById('add-stock-form');
+    let debounceTimer = null;
+    let selectedIndex = -1;
+    let results = [];
+
+    function setSelected(ticker, name) {
+        hiddenInput.value = ticker;
+        searchInput.value = ticker + ' — ' + name;
+        addBtn.disabled = false;
+        errorMsg.classList.add('hidden');
+        searchInput.classList.remove('border-red-400');
+        searchInput.classList.add('border-green-400');
+        hideDropdown();
+    }
+
+    function clearSelection() {
+        hiddenInput.value = '';
+        addBtn.disabled = true;
+        searchInput.classList.remove('border-green-400', 'border-red-400');
+    }
+
+    function showDropdown() { dropdown.classList.remove('hidden'); }
+    function hideDropdown() { dropdown.classList.add('hidden'); selectedIndex = -1; }
+
+    function renderResults(items) {
+        results = items;
+        selectedIndex = -1;
+        if (items.length === 0) {
+            const q = searchInput.value.trim();
+            if (q.length >= 1) {
+                dropdown.innerHTML = '<div class="px-4 py-3 text-sm text-gray-500">No matching stocks found</div>';
+                showDropdown();
+            } else { hideDropdown(); }
+            return;
+        }
+        dropdown.innerHTML = items.map((item, i) =>
+            '<div class="ac-item px-4 py-2.5 cursor-pointer hover:bg-indigo-50 flex items-center justify-between transition' +
+                (item.in_watchlist ? ' bg-gray-50' : '') + '" data-index="' + i + '">' +
+                '<div class="flex items-center gap-2 min-w-0">' +
+                    '<span class="font-semibold text-gray-900">' + escapeHtml(item.ticker) + '</span>' +
+                    '<span class="text-gray-500 text-sm truncate">' + escapeHtml(item.name) + '</span>' +
+                    (item.in_watchlist ? '<span class="text-xs bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-medium">In Watchlist</span>' : '') +
+                '</div>' +
+                (item.exchange ? '<span class="text-xs text-gray-400 ml-2 shrink-0">' + escapeHtml(item.exchange) + '</span>' : '') +
+            '</div>'
+        ).join('');
+        showDropdown();
+        dropdown.querySelectorAll('.ac-item').forEach(el => {
+            el.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                const idx = parseInt(this.dataset.index);
+                setSelected(results[idx].ticker, results[idx].name);
+            });
+        });
+    }
+
+    function highlightItem(index) {
+        dropdown.querySelectorAll('.ac-item').forEach((el, i) => {
+            el.classList.toggle('bg-indigo-50', i === index);
+        });
+    }
+
+    function escapeHtml(text) {
+        const d = document.createElement('div'); d.textContent = text; return d.innerHTML;
+    }
+    // Make it available globally for bulk mode too
+    window._escapeHtml = escapeHtml;
+
+    searchInput.addEventListener('input', function() {
+        clearSelection();
+        const q = this.value.trim();
+        if (q.length < 1) { hideDropdown(); return; }
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+            try {
+                const resp = await fetch('/api/stocks/search?q=' + encodeURIComponent(q) + '&username={{ username }}');
+                renderResults(await resp.json());
+            } catch (e) { console.error('Autocomplete error:', e); }
+        }, 200);
+    });
+
+    searchInput.addEventListener('keydown', function(e) {
+        if (dropdown.classList.contains('hidden')) return;
+        if (e.key === 'ArrowDown') { e.preventDefault(); selectedIndex = Math.min(selectedIndex + 1, results.length - 1); highlightItem(selectedIndex); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); selectedIndex = Math.max(selectedIndex - 1, 0); highlightItem(selectedIndex); }
+        else if (e.key === 'Enter' && selectedIndex >= 0) { e.preventDefault(); setSelected(results[selectedIndex].ticker, results[selectedIndex].name); }
+        else if (e.key === 'Escape') { hideDropdown(); }
+    });
+
+    searchInput.addEventListener('blur', () => setTimeout(hideDropdown, 150));
+    searchInput.addEventListener('focus', () => { if (results.length > 0 && !hiddenInput.value) showDropdown(); });
+
+    form.addEventListener('submit', function(e) {
+        if (!hiddenInput.value) {
+            e.preventDefault();
+            errorMsg.classList.remove('hidden');
+            searchInput.classList.add('border-red-400');
+            searchInput.focus();
+        }
+    });
+})();
+
+// --- Bulk Add ---
+async function submitBulk() {
+    const textarea = document.getElementById('bulk-input');
+    const btn = document.getElementById('bulk-add-btn');
+    const resultsDiv = document.getElementById('bulk-results');
+    const lines = textarea.value.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+    if (lines.length === 0) {
+        resultsDiv.innerHTML = '<p class="text-sm text-amber-600">Please enter at least one stock.</p>';
+        resultsDiv.classList.remove('hidden');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Processing...';
+    resultsDiv.classList.add('hidden');
+
+    try {
+        const resp = await fetch('/api/{{ username }}/add-multiple', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(lines),
+        });
+        const data = await resp.json();
+
+        // Build results UI
+        const statusIcons = {
+            'added': '<span class="text-green-600 font-bold">&#10003;</span>',
+            'already_exists': '<span class="text-indigo-500 font-bold">&#8226;</span>',
+            'not_found': '<span class="text-red-500 font-bold">&#10007;</span>',
+        };
+        const statusLabels = {
+            'added': 'Added',
+            'already_exists': 'Already in watchlist',
+            'not_found': 'Not recognized',
+        };
+
+        let html = '<div class="border border-gray-200 rounded-lg overflow-hidden">';
+        html += '<div class="px-3 py-2 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500 flex justify-between items-center">' +
+                    '<span>Results &mdash; ' + data.added_count + ' added</span>' +
+                    '<button onclick="dismissBulkResults()" class="text-gray-400 hover:text-gray-600 p-0.5" title="Dismiss">' +
+                        '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>' +
+                    '</button>' +
+                '</div>';
+        html += '<div class="divide-y divide-gray-100">';
+        for (const r of data.results) {
+            const rowColor = r.status === 'added' ? 'bg-green-50' : (r.status === 'not_found' ? 'bg-red-50' : '');
+            html += '<div class="px-3 py-2 flex items-center gap-2 text-sm ' + rowColor + '">' +
+                        statusIcons[r.status] +
+                        '<span class="font-mono text-gray-700">' + _escapeHtml(r.input) + '</span>';
+            if (r.ticker && r.input.toUpperCase() !== r.ticker) {
+                html += '<span class="text-gray-400">&rarr;</span>' +
+                        '<span class="font-semibold text-gray-900">' + _escapeHtml(r.ticker) + '</span>';
+            }
+            if (r.name && r.ticker) {
+                html += '<span class="text-gray-400 text-xs truncate hidden sm:inline">' + _escapeHtml(r.name) + '</span>';
+            }
+            html += '<span class="ml-auto text-xs text-gray-400 shrink-0">' + statusLabels[r.status] + '</span>';
+            html += '</div>';
+        }
+        html += '</div></div>';
+        resultsDiv.innerHTML = html;
+        resultsDiv.classList.remove('hidden');
+
+        btn.textContent = 'Add All';
+        btn.disabled = false;
+
+        // Auto-refresh events + digest for newly added stocks
+        if (data.added_count > 0) {
+            await refreshEventsOnly();
+            await generateDigest();
+        }
+    } catch (e) {
+        resultsDiv.innerHTML = '<p class="text-sm text-red-600">Network error. Please try again.</p>';
+        resultsDiv.classList.remove('hidden');
+        btn.textContent = 'Add All';
+        btn.disabled = false;
+    }
+}
+
+function dismissBulkResults() {
+    const resultsDiv = document.getElementById('bulk-results');
+    resultsDiv.classList.add('hidden');
+    resultsDiv.innerHTML = '';
+    location.reload();
+}
+
+function showErrorBanner(errors) {
+    const banner = document.getElementById('error-banner');
+    const list = document.getElementById('error-list');
+    // Group identical errors and count occurrences
+    const counts = {};
+    for (const e of errors) {
+        // Normalize: strip ticker-specific parts for grouping
+        const key = e.replace(/for \w+/g, '').replace(/\(\w+\)/g, '').trim();
+        if (!counts[key]) counts[key] = { msg: e, count: 0, tickers: [] };
+        counts[key].count++;
+        // Extract ticker from message
+        const tickerMatch = e.match(/(?:for |[(\s])([A-Z]{1,5})(?:[)\s]|$)/);
+        if (tickerMatch) counts[key].tickers.push(tickerMatch[1]);
+    }
+    const entries = Object.values(counts);
+    let html = '';
+    for (const entry of entries.slice(0, 10)) {
+        if (entry.count > 1) {
+            // Grouped error
+            const tickerList = entry.tickers.slice(0, 8).join(', ');
+            const more = entry.tickers.length > 8 ? ` +${entry.tickers.length - 8} more` : '';
+            html += '<li>' + _escapeHtml(entry.msg.replace(/(?:for \w+|\(\w+\))/, '')) +
+                    ' <span class="font-medium">(' + _escapeHtml(tickerList + more) + ')</span></li>';
+        } else {
+            html += '<li>' + _escapeHtml(entry.msg) + '</li>';
+        }
+    }
+    if (entries.length > 10) {
+        html += '<li class="text-red-400">...and ' + (entries.length - 10) + ' more errors</li>';
+    }
+    list.innerHTML = html;
+    banner.classList.remove('hidden');
+    banner.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function dismissErrorBanner() {
+    document.getElementById('error-banner').classList.add('hidden');
+}
+
+// --- Streaming Refresh with Progress ---
+function closeProgress() {
+    document.getElementById('refresh-progress').classList.add('hidden');
+    location.reload();
+}
+
+function _progId(ticker) {
+    return 'prog-' + ticker.replace(/[^a-zA-Z0-9]/g, '-');
+}
+
+function initProgressPanel(label, queue, skipped) {
+    const panel = document.getElementById('refresh-progress');
+    const title = document.getElementById('progress-title');
+    const tickersDiv = document.getElementById('progress-tickers');
+    const closeBtn = document.getElementById('progress-close-btn');
+    const spinner = document.getElementById('progress-spinner');
+    const doneIcon = document.getElementById('progress-done-icon');
+
+    spinner.classList.remove('hidden');
+    doneIcon.classList.add('hidden');
+    closeBtn.classList.add('hidden');
+
+    title.textContent = queue.length > 0
+        ? label + '... (0/' + queue.length + ')'
+        : label + ' — all tickers are already fresh';
+    title.dataset.label = label;
+    title.dataset.queueLen = queue.length;
+    title.dataset.done = '0';
+
+    let html = '';
+    for (const t of queue) {
+        html += '<span id="' + _progId(t) + '" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500 transition-all duration-300">' +
+            '<span class="prog-icon w-1.5 h-1.5 rounded-full bg-gray-300 inline-block"></span>' +
+            '<span>' + t + '</span></span>';
+    }
+    if (skipped.length > 0) {
+        html += '<span class="inline-flex items-center px-2 py-1 text-xs text-gray-400 italic border-l border-gray-200 ml-1 pl-3">Already fresh:</span>';
+        for (const t of skipped) {
+            html += '<span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-gray-50 text-gray-300">' + t + '</span>';
+        }
+    }
+    tickersDiv.innerHTML = html;
+    panel.classList.remove('hidden');
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function updateTickerProcessing(ticker) {
+    const el = document.getElementById(_progId(ticker));
+    if (!el) return;
+    el.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 ring-2 ring-indigo-300 transition-all duration-300';
+    const icon = el.querySelector('.prog-icon');
+    icon.className = 'prog-icon w-3 h-3 border-2 border-indigo-300 border-t-indigo-700 rounded-full animate-spin inline-block';
+}
+
+function updateTickerDone(ticker, count, errors) {
+    const el = document.getElementById(_progId(ticker));
+    if (!el) return;
+    const icon = el.querySelector('.prog-icon');
+    if (errors && errors.length > 0) {
+        el.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 transition-all duration-300';
+        icon.className = 'prog-icon text-amber-600';
+        icon.innerHTML = '⚠';
+    } else {
+        el.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 transition-all duration-300';
+        icon.className = 'prog-icon text-green-600';
+        icon.innerHTML = '✓';
+    }
+    const title = document.getElementById('progress-title');
+    const done = parseInt(title.dataset.done) + 1;
+    title.dataset.done = done;
+    title.textContent = title.dataset.label + '... (' + done + '/' + title.dataset.queueLen + ')';
+}
+
+function completeProgress(errors) {
+    const title = document.getElementById('progress-title');
+    const spinner = document.getElementById('progress-spinner');
+    const doneIcon = document.getElementById('progress-done-icon');
+    const closeBtn = document.getElementById('progress-close-btn');
+
+    spinner.classList.add('hidden');
+    doneIcon.classList.remove('hidden');
+    closeBtn.classList.remove('hidden');
+
+    const done = parseInt(title.dataset.done);
+    const queueLen = parseInt(title.dataset.queueLen);
+    const label = title.dataset.label;
+
+    if (errors && errors.length > 0) {
+        title.textContent = label + ' — done with errors (' + done + '/' + queueLen + ')';
+        showErrorBanner(errors);
+    } else if (queueLen === 0) {
+        title.textContent = label + ' — all tickers are already fresh';
+    } else {
+        title.textContent = label + ' — complete (' + done + '/' + queueLen + ')';
+    }
+}
+
+async function streamRefresh(url, label, btnId, textId, iconId, otherBtnId) {
+    const btn = document.getElementById(btnId);
+    const text = document.getElementById(textId);
+    const icon = document.getElementById(iconId);
+    const otherBtn = otherBtnId ? document.getElementById(otherBtnId) : null;
+
+    btn.disabled = true;
+    if (otherBtn) otherBtn.disabled = true;
+    text.textContent = 'Starting...';
+    icon.classList.add('animate-spin');
+    dismissErrorBanner();
+
+    try {
+        const resp = await fetch(url, { method: 'POST' });
+        if (!resp.ok) throw new Error('Server returned ' + resp.status);
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop();
+
+            for (const part of parts) {
+                for (const line of part.split('\n')) {
+                    if (!line.startsWith('data: ')) continue;
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        switch (data.type) {
+                            case 'init':
+                                initProgressPanel(label, data.queue, data.skipped);
+                                text.textContent = data.queue.length > 0
+                                    ? '0/' + data.queue.length
+                                    : 'All fresh';
+                                break;
+                            case 'heartbeat':
+                                // Keepalive — no action needed
+                                break;
+                            case 'processing':
+                                updateTickerProcessing(data.ticker);
+                                break;
+                            case 'ticker_done':
+                                updateTickerDone(data.ticker, data.count, data.errors);
+                                const t = document.getElementById('progress-title');
+                                text.textContent = t.dataset.done + '/' + t.dataset.queueLen;
+                                break;
+                            case 'complete':
+                                completeProgress(data.errors);
+                                break;
+                        }
+                    } catch (parseErr) {
+                        console.error('SSE parse error:', parseErr, line);
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Stream error:', e);
+        showErrorBanner(['Network error — could not reach the server. Please try again.']);
+    }
+
+    btn.disabled = false;
+    if (otherBtn) otherBtn.disabled = false;
+    text.textContent = label.replace('Refreshing ', 'Refresh ');
+    icon.classList.remove('animate-spin');
+}
+
+async function refreshNews() {
+    await streamRefresh(
+        '/api/refresh/{{ username }}/stream',
+        'Refreshing News',
+        'refresh-news-btn', 'refresh-news-text', 'refresh-news-icon',
+        'refresh-events-btn'
+    );
+    // Auto-refresh events after news
+    await refreshEventsOnly();
+    // Auto-regenerate digest after both complete
+    await generateDigest();
+}
+
+async function refreshEventsOnly() {
+    await streamRefresh(
+        '/api/events/refresh/{{ username }}/stream',
+        'Refreshing Events',
+        'refresh-events-btn', 'refresh-events-text', 'refresh-events-icon',
+        'refresh-news-btn'
+    );
+}
+
+async function refreshEvents() {
+    await refreshEventsOnly();
+    // Auto-regenerate digest after events refresh
+    await generateDigest();
+}
+
+{% if stocks %}
+// --- Event list click-to-detail ---
+const typeLabels = {
+    'dividend_ex': 'Ex-Dividend Date',
+    'dividend_pay': 'Dividend Payment',
+    'split': 'Stock Split',
+};
+
+document.querySelectorAll('.event-row').forEach(function(row) {
+    row.addEventListener('click', function() {
+        document.getElementById('modal-title').textContent = this.dataset.title;
+        document.getElementById('modal-ticker').textContent = this.dataset.ticker;
+        document.getElementById('modal-type').textContent = typeLabels[this.dataset.type] || this.dataset.type;
+        document.getElementById('modal-date').textContent = this.dataset.date;
+        document.getElementById('modal-description').textContent = this.dataset.description || 'No details available';
+
+        const metaSection = document.getElementById('modal-meta-section');
+        const metaDiv = document.getElementById('modal-meta');
+        metaDiv.innerHTML = '';
+
+        if (this.dataset.metadata) {
+            try {
+                const meta = JSON.parse(this.dataset.metadata);
+                const items = [];
+                if (meta.record_date) items.push('<p><strong>Record Date:</strong> ' + meta.record_date + '</p>');
+                if (meta.declaration_date) items.push('<p><strong>Declaration Date:</strong> ' + meta.declaration_date + '</p>');
+                if (meta.pay_date) items.push('<p><strong>Pay Date:</strong> ' + meta.pay_date + '</p>');
+                if (meta.currency) items.push('<p><strong>Currency:</strong> ' + meta.currency + '</p>');
+                if (meta.dividend_type) items.push('<p><strong>Type:</strong> ' + meta.dividend_type + '</p>');
+                if (meta.split_from && meta.split_to) items.push('<p><strong>Ratio:</strong> ' + meta.split_to + '-for-' + meta.split_from + '</p>');
+                if (items.length) { metaDiv.innerHTML = items.join(''); metaSection.classList.remove('hidden'); }
+                else { metaSection.classList.add('hidden'); }
+            } catch (e) { metaSection.classList.add('hidden'); }
+        } else { metaSection.classList.add('hidden'); }
+
+        document.getElementById('event-modal').classList.remove('hidden');
+    });
+});
+
+// Format event dates to local weekday abbreviation
+(function() {
+    const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    document.querySelectorAll('.event-date-local').forEach(function(el) {
+        try {
+            const d = new Date(el.dataset.date + 'T00:00:00');
+            if (!isNaN(d)) el.textContent = dayFmt.format(d);
+        } catch(e) {}
+    });
+})();
+
+function closeModal() {
+    document.getElementById('event-modal').classList.add('hidden');
+}
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeModal(); });
+const eventModal = document.getElementById('event-modal');
+if (eventModal) eventModal.addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+{% endif %}
+
+// --- Article Read/Unread ---
+(function() {
+    const username = '{{ username }}';
+
+    function updateArticleUI(card, isRead) {
+        card.dataset.isRead = isRead ? 'true' : 'false';
+        const dot = card.querySelector('.read-dot');
+        const link = card.querySelector('.article-link');
+        const btn = card.querySelector('.toggle-read-btn');
+
+        if (isRead) {
+            card.classList.add('opacity-60');
+            dot.classList.remove('bg-indigo-500');
+            dot.classList.add('bg-gray-300');
+            dot.title = 'Read';
+            link.classList.remove('text-indigo-600');
+            link.classList.add('text-gray-500');
+            btn.textContent = 'Mark unread';
+            btn.title = 'Mark as unread';
+            btn.classList.remove('border-gray-300', 'text-gray-500', 'hover:bg-gray-50');
+            btn.classList.add('border-indigo-300', 'text-indigo-600', 'hover:bg-indigo-50');
+        } else {
+            card.classList.remove('opacity-60');
+            dot.classList.remove('bg-gray-300');
+            dot.classList.add('bg-indigo-500');
+            dot.title = 'Unread';
+            link.classList.remove('text-gray-500');
+            link.classList.add('text-indigo-600');
+            btn.textContent = 'Mark read';
+            btn.title = 'Mark as read';
+            btn.classList.remove('border-indigo-300', 'text-indigo-600', 'hover:bg-indigo-50');
+            btn.classList.add('border-gray-300', 'text-gray-500', 'hover:bg-gray-50');
+        }
+    }
+
+    async function markArticle(articleId, markAsRead) {
+        const endpoint = markAsRead ? 'read' : 'unread';
+        const formData = new FormData();
+        formData.append('username', username);
+        await fetch(`/api/articles/${articleId}/${endpoint}`, {
+            method: 'POST',
+            body: formData,
+        });
+    }
+
+    function reorderArticles() {
+        const list = document.getElementById('articles-list');
+        if (!list) return;
+        const cards = Array.from(list.querySelectorAll('.article-card'));
+        cards.sort((a, b) => {
+            const aRead = a.dataset.isRead === 'true' ? 1 : 0;
+            const bRead = b.dataset.isRead === 'true' ? 1 : 0;
+            if (aRead !== bRead) return aRead - bRead;
+            return 0; // preserve existing order within group
+        });
+        cards.forEach(card => list.appendChild(card));
+    }
+
+    // Click on article link → mark as read
+    document.querySelectorAll('.article-link').forEach(link => {
+        link.addEventListener('click', function() {
+            const articleId = this.dataset.articleId;
+            const card = this.closest('.article-card');
+            if (card.dataset.isRead === 'false') {
+                markArticle(articleId, true);
+                updateArticleUI(card, true);
+                setTimeout(reorderArticles, 400);
+            }
+        });
+    });
+
+    // Toggle read/unread button
+    document.querySelectorAll('.toggle-read-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const articleId = this.dataset.articleId;
+            const card = this.closest('.article-card');
+            const currentlyRead = card.dataset.isRead === 'true';
+            const newState = !currentlyRead;
+            markArticle(articleId, newState);
+            updateArticleUI(card, newState);
+            setTimeout(reorderArticles, 400);
+        });
+    });
+})();
+
+// --- Timezone-aware timestamp formatting ---
+(function() {
+    let tz;
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch(e) {}
+    if (!tz) tz = 'America/New_York';
+
+    const fmt = new Intl.DateTimeFormat(undefined, {
+        timeZone: tz,
+        month: 'short', day: 'numeric',
+        hour: 'numeric', minute: '2-digit',
+        hour12: true,
+    });
+
+    document.querySelectorAll('.local-time').forEach(el => {
+        const raw = el.dataset.utc;
+        if (!raw) return;
+        try {
+            const d = new Date(raw.endsWith('Z') || raw.includes('+') ? raw : raw + 'Z');
+            if (!isNaN(d)) el.textContent = fmt.format(d);
+        } catch(e) {}
+    });
+})();
+
+// --- Format cached digest on page load ---
+(function() {
+    const el = document.getElementById('digest-text');
+    if (el && el.dataset.raw) {
+        el.innerHTML = formatDigest(el.dataset.raw);
+    }
+})();
+</script>
+{% endblock %}
