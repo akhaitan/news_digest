@@ -13,12 +13,12 @@ from app.config import DEFAULT_STOCKS, REFRESH_HOUR
 from app.db import (
     init_db, get_user_stock_summary, get_articles, get_last_refresh,
     add_user_ticker, remove_user_ticker, get_user_tickers, get_stock_name,
-    search_known_stocks, resolve_ticker, get_known_stock_count,
-    upsert_known_stocks, get_known_stock_name, upsert_stock,
+    upsert_known_stocks, upsert_stock,
     mark_article_read, mark_article_unread, get_read_article_ids,
     get_user_refresh_timestamps, get_stale_tickers,
     get_cached_digest,
 )
+import app.stock_cache as stock_cache
 from app.services.news import refresh_all_stocks, refresh_stock, refresh_user_stocks
 from app.services.events import refresh_events_for_user, refresh_all_events, get_user_events, refresh_events_for_ticker
 from app.sources.polygon_tickers import fetch_all_us_tickers
@@ -48,13 +48,14 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     logger.info(f"Scheduler started — nightly refresh at {REFRESH_HOUR}:00")
 
-    # Populate known stocks if table has fewer than 100 entries
-    count = get_known_stock_count()
+    # Load known stocks into in-memory cache
+    stock_cache.load_cache_from_db()
+    count = stock_cache.get_count()
     if count < 100:
-        logger.info(f"Known stocks table has {count} entries — fetching US tickers from Polygon.io in background...")
+        logger.info(f"Known stocks cache has {count} entries — fetching US tickers from Polygon.io in background...")
         asyncio.create_task(_populate_known_stocks())
     else:
-        logger.info(f"Known stocks table has {count} entries — skipping fetch")
+        logger.info(f"Known stocks cache has {count} entries — skipping fetch")
 
     yield
     scheduler.shutdown()
@@ -68,9 +69,12 @@ async def _populate_known_stocks():
             # Fallback: seed with DEFAULT_STOCKS if API fails
             fallback = [{"ticker": t, "name": n, "exchange": ""} for t, n in DEFAULT_STOCKS.items()]
             upsert_known_stocks(fallback)
+            stock_cache.update_cache(fallback)
             logger.warning(f"API fetch failed, seeded {len(fallback)} default stocks")
         else:
-            logger.info(f"Finished populating {len(tickers)} known stocks")
+            # Reload cache from DB (polygon_tickers.py already called upsert_known_stocks per exchange)
+            stock_cache.load_cache_from_db()
+            logger.info(f"Finished populating {len(tickers)} known stocks, cache refreshed")
     except Exception as e:
         logger.error(f"Failed to populate known stocks: {e}")
 
@@ -90,7 +94,7 @@ async def api_stock_search(q: str = "", username: str = ""):
     
     If username is provided, results include an 'in_watchlist' flag.
     """
-    results = search_known_stocks(q.strip(), limit=15)
+    results = stock_cache.search(q.strip(), limit=15)
     if username:
         user_tickers = set(get_user_tickers(username))
         for r in results:
@@ -104,6 +108,7 @@ async def api_refresh_stock_list():
     tickers = await fetch_all_us_tickers()
     if tickers:
         upsert_known_stocks(tickers)
+        stock_cache.load_cache_from_db()
         return JSONResponse({"status": "ok", "count": len(tickers)})
     return JSONResponse({"status": "error", "message": "No tickers fetched"}, status_code=500)
 
@@ -222,13 +227,13 @@ async def stock_detail(request: Request, username: str, ticker: str):
 async def add_ticker(username: str, ticker: str = Form(...)):
     raw_input = ticker.strip()
     # Resolve input to a known ticker (handles both ticker symbols and company names)
-    resolved = resolve_ticker(raw_input)
+    resolved = stock_cache.resolve_ticker(raw_input)
     if not resolved:
         # User entered something we don't recognize
         return RedirectResponse(f"/{username}?error=unknown_ticker&q={raw_input}", status_code=303)
 
     # Use the resolved ticker and update the stocks table with the proper name
-    known_name = get_known_stock_name(resolved)
+    known_name = stock_cache.get_name(resolved)
     if known_name:
         upsert_stock(resolved, known_name)
     add_user_ticker(username, resolved)
@@ -260,12 +265,12 @@ async def add_multiple_tickers(username: str, tickers: list[str] = Body(...)):
         raw = raw.strip()
         if not raw:
             continue
-        resolved = resolve_ticker(raw)
+        resolved = stock_cache.resolve_ticker(raw)
         if not resolved:
             line_results.append({"input": raw, "status": "not_found", "ticker": None, "name": None})
             continue
 
-        known_name = get_known_stock_name(resolved) or resolved
+        known_name = stock_cache.get_name(resolved) or resolved
 
         if resolved in existing_tickers:
             line_results.append({"input": raw, "status": "already_exists", "ticker": resolved, "name": known_name})
