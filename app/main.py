@@ -146,7 +146,7 @@ async def dashboard(request: Request, username: str):
 
         if nr:
             diff = (now - datetime.fromisoformat(nr)).total_seconds() / 60
-            stock["news_freshness"] = "green" if diff < 480 else ("yellow" if diff < 1440 else "red")
+            stock["news_freshness"] = "green" if diff < 1440 else ("yellow" if diff < 4320 else "red")
             stock["news_ago"] = _format_ago(diff)
         else:
             stock["news_freshness"] = "gray"
@@ -154,7 +154,7 @@ async def dashboard(request: Request, username: str):
 
         if er:
             diff = (now - datetime.fromisoformat(er)).total_seconds() / 60
-            stock["events_freshness"] = "green" if diff < 480 else ("yellow" if diff < 1440 else "red")
+            stock["events_freshness"] = "green" if diff < 1440 else ("yellow" if diff < 4320 else "red")
             stock["events_ago"] = _format_ago(diff)
         else:
             stock["events_freshness"] = "gray"
@@ -369,7 +369,7 @@ async def api_get_events(username: str, start: str = "", end: str = ""):
 
 @app.post("/api/events/refresh/{username}")
 async def api_refresh_events(username: str):
-    results, errors, skipped = await refresh_events_for_user(username, stale_minutes=480)
+    results, errors, skipped = await refresh_events_for_user(username, stale_minutes=1440)
     total = sum(results.values())
     response = {
         "status": "partial" if errors else "ok",
@@ -421,7 +421,7 @@ async def api_generate_digest(username: str):
 
 @app.post("/api/refresh/{username}")
 async def api_refresh_user(username: str):
-    results, errors, skipped = await refresh_user_stocks(username, stale_minutes=480)
+    results, errors, skipped = await refresh_user_stocks(username, stale_minutes=1440)
     total = sum(results.values())
     response = {
         "status": "partial" if errors else "ok",
@@ -447,7 +447,7 @@ async def api_refresh_user_stream(username: str):
     """
     async def generate():
         all_tickers = get_user_tickers(username)
-        stale = get_stale_tickers(username, stale_minutes=480, log_table="refresh_log")
+        stale = get_stale_tickers(username, stale_minutes=1440, log_table="refresh_log")
         stale_set = set(stale)
         skipped = [t for t in all_tickers if t not in stale_set]
 
@@ -513,7 +513,7 @@ async def api_refresh_events_stream(username: str):
     """
     async def generate():
         all_tickers = get_user_tickers(username)
-        stale = get_stale_tickers(username, stale_minutes=480, log_table="events_refresh_log")
+        stale = get_stale_tickers(username, stale_minutes=1440, log_table="events_refresh_log")
         stale_set = set(stale)
         skipped = [t for t in all_tickers if t not in stale_set]
 
