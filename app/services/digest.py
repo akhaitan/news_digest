@@ -28,7 +28,7 @@ Your job: produce a **Portfolio Digest** — a scannable briefing. Follow these 
 
 1. One bullet per ticker that has significant news or upcoming events.
 2. If a ticker has multiple articles, synthesize them into that single bullet.
-3. If a ticker also has upcoming events (dividends, splits, earnings), include
+3. If a ticker also has upcoming dividend events, include
    that info in the SAME bullet — append it after the news summary
    (e.g. "... Also, ex-dividend date on Feb 20.").
 4. Lead each bullet with an emoji:

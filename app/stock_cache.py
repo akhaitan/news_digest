@@ -5,6 +5,8 @@ All search/resolve/lookup operations run against this in-memory list,
 making autocomplete instant regardless of DB latency.
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 

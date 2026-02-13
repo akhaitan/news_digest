@@ -129,8 +129,7 @@ async def fetch_splits(ticker: str) -> list[dict]:
 async def fetch_ticker_events(ticker: str) -> tuple[list[dict], list[str]]:
     """Fetch all event types for a ticker.
     
-    Returns (events, errors). Partial success is possible —
-    e.g. dividends succeed but splits are rate-limited.
+    Returns (events, errors). Currently fetches dividends only.
     """
     all_events = []
     errors = []
@@ -138,12 +137,6 @@ async def fetch_ticker_events(ticker: str) -> tuple[list[dict], list[str]]:
     try:
         dividends = await fetch_dividends(ticker)
         all_events.extend(dividends)
-    except Exception as e:
-        errors.append(str(e))
-
-    try:
-        splits = await fetch_splits(ticker)
-        all_events.extend(splits)
     except Exception as e:
         errors.append(str(e))
 

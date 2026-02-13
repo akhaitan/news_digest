@@ -16,7 +16,7 @@ from app.db import (
     upsert_known_stocks, upsert_stock,
     mark_article_read, mark_article_unread, get_read_article_ids,
     get_user_refresh_timestamps, get_stale_tickers,
-    get_cached_digest,
+    get_cached_digest, get_events_for_ticker,
 )
 import app.stock_cache as stock_cache
 from app.services.news import refresh_all_stocks, refresh_stock, refresh_user_stocks
@@ -163,17 +163,26 @@ async def dashboard(request: Request, username: str):
     # Load cached digest (if any)
     digest = get_cached_digest(username)
 
-    # Group upcoming events into this_week / next_week / later
+    # Group upcoming events into this_week / next_week / weeks 3-4 / later
     today = datetime.now(timezone.utc).date()
     # Monday of this week
     week_start = today - timedelta(days=today.weekday())
     this_week_end = week_start + timedelta(days=6)
-    next_week_start = week_start + timedelta(days=7)
     next_week_end = week_start + timedelta(days=13)
+    week4_end = week_start + timedelta(days=27)  # 4 weeks total
 
     all_events = get_user_events(username, start_date=today.isoformat())
+
+    # Count events per ticker for the watchlist display
+    event_counts: dict[str, int] = {}
+    for ev in all_events:
+        event_counts[ev["ticker"]] = event_counts.get(ev["ticker"], 0) + 1
+    for stock in stocks:
+        stock["event_count"] = event_counts.get(stock["ticker"], 0)
+
     events_this_week = []
     events_next_week = []
+    events_weeks_3_4 = []
     events_later_count = 0
     for ev in all_events:
         ev_date = datetime.strptime(ev["event_date"], "%Y-%m-%d").date()
@@ -181,6 +190,8 @@ async def dashboard(request: Request, username: str):
             events_this_week.append(ev)
         elif ev_date <= next_week_end:
             events_next_week.append(ev)
+        elif ev_date <= week4_end:
+            events_weeks_3_4.append(ev)
         else:
             events_later_count += 1
 
@@ -195,6 +206,7 @@ async def dashboard(request: Request, username: str):
             "digest": digest,
             "events_this_week": events_this_week,
             "events_next_week": events_next_week,
+            "events_weeks_3_4": events_weeks_3_4,
             "events_later_count": events_later_count,
         },
     )
@@ -210,6 +222,16 @@ async def stock_detail(request: Request, username: str, ticker: str):
     articles = get_articles(ticker, hours=72)
     last_refresh = get_last_refresh(ticker)
     name = get_stock_name(ticker) or ticker
+
+    # Get upcoming events for this ticker
+    today = datetime.now(timezone.utc).date()
+    all_ticker_events = get_events_for_ticker(ticker)
+    upcoming_events = [
+        ev for ev in all_ticker_events
+        if ev.get("event_date", "") >= today.isoformat()
+    ]
+    upcoming_events.sort(key=lambda e: e.get("event_date", ""))
+
     return templates.TemplateResponse(
         "stock.html",
         {
@@ -219,6 +241,7 @@ async def stock_detail(request: Request, username: str, ticker: str):
             "name": name,
             "articles": articles,
             "last_refresh": last_refresh,
+            "events": upcoming_events,
         },
     )
 
@@ -290,14 +313,6 @@ async def add_multiple_tickers(username: str, tickers: list[str] = Body(...)):
 
     if added:
         await asyncio.gather(*[fetch_if_needed(t) for t in added])
-        # Auto-fetch events for newly added tickers
-        for t in added:
-            await refresh_events_for_ticker(t)
-        # Auto-regenerate portfolio digest
-        try:
-            await generate_digest(username)
-        except Exception as e:
-            logger.warning(f"Auto-digest generation failed: {e}")
 
     return JSONResponse({
         "status": "ok",
@@ -334,7 +349,6 @@ async def api_get_events(username: str, start: str = "", end: str = ""):
     color_map = {
         "dividend_ex": "#10b981",    # green
         "dividend_pay": "#6366f1",   # indigo
-        "split": "#f59e0b",          # amber
     }
     for e in events:
         fc_events.append({
@@ -495,8 +509,7 @@ async def api_refresh_events_stream(username: str):
     """Stream progress updates as events are refreshed for each ticker.
 
     Uses a background task + queue pattern with heartbeats so the SSE
-    connection stays alive during long rate-limiter waits (events need
-    2 API calls per ticker: dividends + splits).
+    connection stays alive during long rate-limiter waits.
     """
     async def generate():
         all_tickers = get_user_tickers(username)
