@@ -14,3 +14,17 @@ services:
       - key: PYTHON_VERSION
         value: "3.11"
 
+  - type: cron
+    name: refresh-top-stocks
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    schedule: "0 */9 * * *"
+    command: python jobs/refresh_top_stocks.py
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: MASSIVE_API_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.11"
+

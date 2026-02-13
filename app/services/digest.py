@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from openai import AsyncOpenAI
 
@@ -11,7 +11,6 @@ from app.config import OPENAI_API_KEY
 from app.db import (
     get_user_tickers,
     get_articles,
-    get_events_for_tickers,
     get_cached_digest,
     save_digest,
 )
@@ -22,24 +21,21 @@ MODEL = "gpt-4o-mini"
 
 SYSTEM_PROMPT = """\
 You are a concise financial news analyst. The user will give you a list of recent
-news articles and upcoming corporate events for stocks in their portfolio.
+news articles for stocks in their portfolio.
 
 Your job: produce a **Portfolio Digest** — a scannable briefing. Follow these rules:
 
-1. One bullet per ticker that has significant news or upcoming events.
+1. One bullet per ticker that has significant news.
 2. If a ticker has multiple articles, synthesize them into that single bullet.
-3. If a ticker also has upcoming dividend events, include
-   that info in the SAME bullet — append it after the news summary
-   (e.g. "... Also, ex-dividend date on Feb 20.").
-4. Lead each bullet with an emoji:
+3. Lead each bullet with an emoji:
    📈 for positive / bullish news
    📉 for negative / bearish news
    ⚖️ for neutral or mixed
-5. Mention the ticker symbol in **bold** for each bullet.
-6. At the end, combine ALL tickers with no significant news AND no upcoming events
+4. Mention the ticker symbol in **bold** for each bullet.
+5. At the end, combine ALL tickers with no significant news
    into a single line (e.g. "⚖️ **XYZ, ABC, DEF**: No significant news.").
-7. Do NOT repeat article titles verbatim — synthesize and summarize.
-8. For EVERY bullet that has news, you MUST include at least one markdown link
+6. Do NOT repeat article titles verbatim — synthesize and summarize.
+7. For EVERY bullet that has news, you MUST include at least one markdown link
    to the most relevant source article: [short phrase](url).
    Use the exact URLs provided in the data — NEVER invent or modify URLs.
    Keep link text to 2–4 words.
@@ -48,10 +44,9 @@ Your job: produce a **Portfolio Digest** — a scannable briefing. Follow these 
 
 def _build_context(
     articles: list[dict],
-    events: list[dict],
     tickers: list[str],
 ) -> str:
-    """Build the user-message context from articles and events."""
+    """Build the user-message context from articles."""
     lines = [f"Portfolio tickers: {', '.join(tickers)}", ""]
 
     if articles:
@@ -70,15 +65,8 @@ def _build_context(
                 + (f" | url: {url}" if url else "")
             )
         lines.append("")
-
-    if events:
-        lines.append(f"--- Upcoming Events ({len(events)}) ---")
-        for e in events:
-            lines.append(f"[{e['ticker']}] {e['event_date']} — {e['title']}")
-        lines.append("")
-
-    if not articles and not events:
-        lines.append("No recent news articles or upcoming events found.")
+    else:
+        lines.append("No recent news articles found.")
 
     return "\n".join(lines)
 
@@ -107,16 +95,11 @@ async def generate_digest(username: str) -> dict:
     # Sort by published_at descending
     all_articles.sort(key=lambda a: a.get("published_at") or "", reverse=True)
 
-    # Gather upcoming events (next 14 days)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    future = (datetime.now(timezone.utc) + timedelta(days=14)).strftime("%Y-%m-%d")
-    upcoming_events = get_events_for_tickers(tickers, start_date=today, end_date=future)
-
-    context = _build_context(all_articles, upcoming_events, tickers)
+    context = _build_context(all_articles, tickers)
 
     logger.info(
         f"Generating digest for {username}: {len(all_articles)} articles, "
-        f"{len(upcoming_events)} events, ~{len(context)} chars context"
+        f"~{len(context)} chars context"
     )
 
     client = AsyncOpenAI(api_key=OPENAI_API_KEY)

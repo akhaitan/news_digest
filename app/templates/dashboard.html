@@ -60,14 +60,6 @@
             </svg>
             <span id="refresh-news-text">Refresh News</span>
         </button>
-        <button id="refresh-events-btn" onclick="refreshEvents()"
-            class="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 transition flex items-center gap-2 text-sm">
-            <svg id="refresh-events-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-            </svg>
-            <span id="refresh-events-text">Refresh Events</span>
-        </button>
     </div>
 </div>
 
@@ -149,7 +141,7 @@
         {% if digest %}
         <div id="digest-text" class="prose prose-sm max-w-none digest-bullets" data-raw="{{ digest.digest_text | e }}"></div>
         {% else %}
-        <p class="text-gray-400 italic">Click "Generate Digest" to get an AI-powered summary of your portfolio news and upcoming events.</p>
+        <p class="text-gray-400 italic">Click "Generate Digest" to get an AI-powered summary of your portfolio news.</p>
         {% endif %}
     </div>
 </div>
@@ -184,9 +176,6 @@
                     </a>
                     <div class="flex items-center gap-1.5 shrink-0 ml-2">
                         <span class="text-xs text-gray-400">{{ stock.article_count }} article{{ 's' if stock.article_count != 1 else '' }}</span>
-                        {% if stock.event_count > 0 %}
-                        <span class="text-xs text-gray-400">· {{ stock.event_count }} event{{ 's' if stock.event_count != 1 else '' }}</span>
-                        {% endif %}
                         <form action="/{{ username }}/remove/{{ stock.ticker }}" method="post"
                               onsubmit="return confirm('Remove {{ stock.ticker }} from your watchlist?')" class="inline">
                             <button type="submit" class="text-gray-300 hover:text-red-500 p-0.5 rounded hover:bg-red-50 transition opacity-0 group-hover:opacity-100" title="Remove {{ stock.ticker }}">
@@ -209,159 +198,6 @@
 </div>
 {% endif %}
 
-<!-- Upcoming Events -->
-{% if stocks %}
-{% set total_events = (events_this_week|length) + (events_next_week|length) + (events_weeks_3_4|length) + events_later_count %}
-<div class="mt-6 mb-6">
-    <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        <!-- Header -->
-        <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-            <h2 class="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-                </svg>
-                Upcoming Events
-                {% if total_events > 0 %}
-                <span class="bg-indigo-100 text-indigo-700 text-xs font-medium px-2 py-0.5 rounded-full">{{ total_events }}</span>
-                {% endif %}
-            </h2>
-            <div class="flex items-center gap-3 text-xs text-gray-400">
-                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>Ex-Div</span>
-                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-indigo-500 inline-block"></span>Pay</span>
-            </div>
-        </div>
-
-        {% if total_events == 0 %}
-        <div class="px-4 py-6 text-center text-sm text-gray-400 italic">No upcoming events.</div>
-        {% else %}
-        <div class="divide-y divide-gray-50">
-            <!-- This Week -->
-            {% if events_this_week %}
-            <div class="px-4 py-2">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">This Week</p>
-                <div class="space-y-1">
-                    {% for ev in events_this_week %}
-                    <div class="flex items-center gap-2 py-1 group cursor-pointer event-row"
-                         data-title="{{ ev.title }}" data-ticker="{{ ev.ticker }}"
-                         data-type="{{ ev.event_type }}" data-date="{{ ev.event_date }}"
-                         data-description="{{ ev.description or '' }}"
-                         data-metadata="{{ ev.metadata or '' }}">
-                        <span class="w-2 h-2 rounded-full shrink-0
-                            {% if ev.event_type == 'dividend_ex' %}bg-emerald-500
-                            {% elif ev.event_type == 'dividend_pay' %}bg-indigo-500
-                            {% else %}bg-gray-400{% endif %}"></span>
-                        <span class="text-xs font-medium text-gray-500 w-16 shrink-0 event-date-local" data-date="{{ ev.event_date }}">{{ ev.event_date[5:] }}</span>
-                        <span class="text-sm font-semibold text-gray-800 w-14 shrink-0">{{ ev.ticker }}</span>
-                        <span class="text-sm text-gray-600 truncate">{{ ev.title }}</span>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-
-            <!-- Next Week -->
-            {% if events_next_week %}
-            <div class="px-4 py-2">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Next Week</p>
-                <div class="space-y-1">
-                    {% for ev in events_next_week %}
-                    <div class="flex items-center gap-2 py-1 group cursor-pointer event-row"
-                         data-title="{{ ev.title }}" data-ticker="{{ ev.ticker }}"
-                         data-type="{{ ev.event_type }}" data-date="{{ ev.event_date }}"
-                         data-description="{{ ev.description or '' }}"
-                         data-metadata="{{ ev.metadata or '' }}">
-                        <span class="w-2 h-2 rounded-full shrink-0
-                            {% if ev.event_type == 'dividend_ex' %}bg-emerald-500
-                            {% elif ev.event_type == 'dividend_pay' %}bg-indigo-500
-                            {% else %}bg-gray-400{% endif %}"></span>
-                        <span class="text-xs font-medium text-gray-500 w-16 shrink-0 event-date-local" data-date="{{ ev.event_date }}">{{ ev.event_date[5:] }}</span>
-                        <span class="text-sm font-semibold text-gray-800 w-14 shrink-0">{{ ev.ticker }}</span>
-                        <span class="text-sm text-gray-600 truncate">{{ ev.title }}</span>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-
-            <!-- Weeks 3-4 -->
-            {% if events_weeks_3_4 %}
-            <div class="px-4 py-2">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Weeks 3–4</p>
-                <div class="space-y-1">
-                    {% for ev in events_weeks_3_4 %}
-                    <div class="flex items-center gap-2 py-1 group cursor-pointer event-row"
-                         data-title="{{ ev.title }}" data-ticker="{{ ev.ticker }}"
-                         data-type="{{ ev.event_type }}" data-date="{{ ev.event_date }}"
-                         data-description="{{ ev.description or '' }}"
-                         data-metadata="{{ ev.metadata or '' }}">
-                        <span class="w-2 h-2 rounded-full shrink-0
-                            {% if ev.event_type == 'dividend_ex' %}bg-emerald-500
-                            {% elif ev.event_type == 'dividend_pay' %}bg-indigo-500
-                            {% else %}bg-gray-400{% endif %}"></span>
-                        <span class="text-xs font-medium text-gray-500 w-16 shrink-0 event-date-local" data-date="{{ ev.event_date }}">{{ ev.event_date[5:] }}</span>
-                        <span class="text-sm font-semibold text-gray-800 w-14 shrink-0">{{ ev.ticker }}</span>
-                        <span class="text-sm text-gray-600 truncate">{{ ev.title }}</span>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-
-            <!-- Later -->
-            {% if events_later_count > 0 %}
-            <div class="px-4 py-2">
-                <p class="text-xs text-gray-400">
-                    <span class="font-semibold">{{ events_later_count }}</span> more event{{ 's' if events_later_count != 1 else '' }} beyond 4 weeks
-                </p>
-            </div>
-            {% endif %}
-        </div>
-        {% endif %}
-    </div>
-</div>
-
-<!-- Event Detail Modal -->
-<div id="event-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
-    <div class="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
-        <div class="flex items-start justify-between mb-4">
-            <h3 id="modal-title" class="text-lg font-bold text-gray-900"></h3>
-            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 p-1">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-            </button>
-        </div>
-        <div class="space-y-3">
-            <div>
-                <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Ticker</span>
-                <p id="modal-ticker" class="text-sm font-semibold text-gray-800"></p>
-            </div>
-            <div>
-                <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Event Type</span>
-                <p id="modal-type" class="text-sm text-gray-800"></p>
-            </div>
-            <div>
-                <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Date</span>
-                <p id="modal-date" class="text-sm text-gray-800"></p>
-            </div>
-            <div>
-                <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Details</span>
-                <p id="modal-description" class="text-sm text-gray-800"></p>
-            </div>
-            <div id="modal-meta-section" class="hidden">
-                <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Additional Info</span>
-                <div id="modal-meta" class="text-sm text-gray-700 mt-1 space-y-1"></div>
-            </div>
-        </div>
-        <div class="mt-6 flex justify-end">
-            <button onclick="closeModal()"
-                    class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition text-sm">
-                Close
-            </button>
-        </div>
-    </div>
-</div>
-{% endif %}
 
 {% if articles %}
 <h2 class="text-xl font-bold mt-10 mb-4">Latest News</h2>
@@ -690,9 +526,8 @@ async function submitBulk() {
         btn.textContent = 'Add All';
         btn.disabled = false;
 
-        // Auto-refresh events + digest for newly added stocks
+        // Auto-regenerate digest for newly added stocks
         if (data.added_count > 0) {
-            await refreshEventsOnly();
             await generateDigest();
         }
     } catch (e) {
@@ -923,84 +758,12 @@ async function refreshNews() {
         '/api/refresh/{{ username }}/stream',
         'Refreshing News',
         'refresh-news-btn', 'refresh-news-text', 'refresh-news-icon',
-        'refresh-events-btn'
+        null
     );
-    // Auto-refresh events after news
-    await refreshEventsOnly();
-    // Auto-regenerate digest after both complete
+    // Auto-regenerate digest after news refresh
     await generateDigest();
 }
 
-async function refreshEventsOnly() {
-    await streamRefresh(
-        '/api/events/refresh/{{ username }}/stream',
-        'Refreshing Events',
-        'refresh-events-btn', 'refresh-events-text', 'refresh-events-icon',
-        'refresh-news-btn'
-    );
-}
-
-async function refreshEvents() {
-    await refreshEventsOnly();
-    // Auto-regenerate digest after events refresh
-    await generateDigest();
-}
-
-{% if stocks %}
-// --- Event list click-to-detail ---
-const typeLabels = {
-    'dividend_ex': 'Ex-Dividend Date',
-    'dividend_pay': 'Dividend Payment',
-};
-
-document.querySelectorAll('.event-row').forEach(function(row) {
-    row.addEventListener('click', function() {
-        document.getElementById('modal-title').textContent = this.dataset.title;
-        document.getElementById('modal-ticker').textContent = this.dataset.ticker;
-        document.getElementById('modal-type').textContent = typeLabels[this.dataset.type] || this.dataset.type;
-        document.getElementById('modal-date').textContent = this.dataset.date;
-        document.getElementById('modal-description').textContent = this.dataset.description || 'No details available';
-
-        const metaSection = document.getElementById('modal-meta-section');
-        const metaDiv = document.getElementById('modal-meta');
-        metaDiv.innerHTML = '';
-
-        if (this.dataset.metadata) {
-            try {
-                const meta = JSON.parse(this.dataset.metadata);
-                const items = [];
-                if (meta.record_date) items.push('<p><strong>Record Date:</strong> ' + meta.record_date + '</p>');
-                if (meta.declaration_date) items.push('<p><strong>Declaration Date:</strong> ' + meta.declaration_date + '</p>');
-                if (meta.pay_date) items.push('<p><strong>Pay Date:</strong> ' + meta.pay_date + '</p>');
-                if (meta.currency) items.push('<p><strong>Currency:</strong> ' + meta.currency + '</p>');
-                if (meta.dividend_type) items.push('<p><strong>Type:</strong> ' + meta.dividend_type + '</p>');
-                if (items.length) { metaDiv.innerHTML = items.join(''); metaSection.classList.remove('hidden'); }
-                else { metaSection.classList.add('hidden'); }
-            } catch (e) { metaSection.classList.add('hidden'); }
-        } else { metaSection.classList.add('hidden'); }
-
-        document.getElementById('event-modal').classList.remove('hidden');
-    });
-});
-
-// Format event dates to local weekday abbreviation
-(function() {
-    const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-    document.querySelectorAll('.event-date-local').forEach(function(el) {
-        try {
-            const d = new Date(el.dataset.date + 'T00:00:00');
-            if (!isNaN(d)) el.textContent = dayFmt.format(d);
-        } catch(e) {}
-    });
-})();
-
-function closeModal() {
-    document.getElementById('event-modal').classList.add('hidden');
-}
-document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeModal(); });
-const eventModal = document.getElementById('event-modal');
-if (eventModal) eventModal.addEventListener('click', function(e) { if (e.target === this) closeModal(); });
-{% endif %}
 
 // --- Article Read/Unread ---
 (function() {
