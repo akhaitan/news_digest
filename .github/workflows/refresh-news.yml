@@ -1,0 +1,34 @@
+name: Refresh All News
+
+on:
+  schedule:
+    # 1:00 AM EST = 06:00 UTC
+    - cron: "0 6 * * *"
+    # 5:00 PM EST = 22:00 UTC
+    - cron: "0 22 * * *"
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+jobs:
+  refresh-news:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # Allow up to 2 hours for large ticker lists
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Refresh news for all stocks
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+        run: python jobs/refresh_all_news.py
+
