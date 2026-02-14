@@ -8,15 +8,18 @@ from apscheduler.triggers.cron import CronTrigger
 
 import asyncio
 import json
+import httpx
 from datetime import datetime, timezone
-from app.config import DEFAULT_STOCKS, REFRESH_HOUR
+from app.config import DEFAULT_STOCKS, REFRESH_HOUR, APP_BASE_URL, RESEND_API_KEY, RECIPIENT_EMAIL
 from app.db import (
-    init_db, get_user_stock_summary, get_articles, get_last_refresh,
+    init_db, get_user_stock_summary, get_articles, get_articles_for_tickers,
+    get_last_refresh,
     add_user_ticker, remove_user_ticker, get_user_tickers, get_stock_name,
     upsert_known_stocks, upsert_stock,
     mark_article_read, mark_article_unread, get_read_article_ids,
     get_user_refresh_timestamps, get_stale_tickers,
-    get_cached_digest,
+    get_cached_digest, get_dashboard_data,
+    get_user_email, set_user_email,
 )
 import app.stock_cache as stock_cache
 from app.services.news import refresh_all_stocks, refresh_stock, refresh_user_stocks
@@ -120,17 +123,16 @@ def _format_ago(minutes: float) -> str:
 
 @app.get("/{username}", response_class=HTMLResponse)
 async def dashboard(request: Request, username: str):
-    stocks = get_user_stock_summary(username, hours=72)
-    tickers = get_user_tickers(username)
-    all_articles = []
-    for t in tickers:
-        all_articles.extend(get_articles(t, hours=72))
-    # Sort by recency (newest first)
-    read_ids = get_read_article_ids(username)
-    all_articles.sort(key=lambda a: a.get("published_at") or "", reverse=True)
+    # Single consolidated DB call fetches everything in one connection
+    data = get_dashboard_data(username, hours=72)
+    stocks = data["stocks"]
+    all_articles = data["articles"]  # already sorted by recency (DESC)
+    read_ids = data["read_ids"]
+    refresh_ts = data["refresh_ts"]
+    digest = data["digest"]
+    user_email = data["user_email"]
 
     # Compute per-stock freshness indicators
-    refresh_ts = get_user_refresh_timestamps(username)
     now = datetime.now(timezone.utc)
     for stock in stocks:
         ts = refresh_ts.get(stock["ticker"], {})
@@ -144,9 +146,6 @@ async def dashboard(request: Request, username: str):
             stock["news_freshness"] = "gray"
             stock["news_ago"] = "Never"
 
-    # Load cached digest (if any)
-    digest = get_cached_digest(username)
-
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -156,6 +155,8 @@ async def dashboard(request: Request, username: str):
             "articles": all_articles,
             "read_ids": read_ids,
             "digest": digest,
+            "app_base_url": APP_BASE_URL,
+            "user_email": user_email or "",
         },
     )
 
@@ -298,6 +299,83 @@ async def api_generate_digest(username: str):
         logger.error(f"Digest generation failed for {username}: {e}")
         return JSONResponse(
             {"status": "error", "message": f"Failed to generate digest: {str(e)[:200]}"},
+            status_code=500,
+        )
+
+
+@app.post("/api/email/set/{username}")
+async def api_set_email(username: str, payload: dict = Body(...)):
+    """Save the user's email address."""
+    email = (payload.get("email") or "").strip()
+    if not email:
+        return JSONResponse({"status": "error", "message": "Email is required."}, status_code=400)
+    set_user_email(username, email)
+    return JSONResponse({"status": "ok", "email": email})
+
+
+@app.post("/api/email/send/{username}")
+async def api_send_email(username: str, payload: dict = Body(...)):
+    """Send the portfolio digest email via Resend."""
+    if not RESEND_API_KEY:
+        return JSONResponse(
+            {"status": "error", "message": "RESEND_API_KEY is not configured."},
+            status_code=500,
+        )
+
+    # Determine recipient: user's stored email
+    user_email = get_user_email(username)
+    if not user_email:
+        return JSONResponse(
+            {"status": "error", "message": "No email address set. Please add your email first."},
+            status_code=400,
+        )
+
+    subject = payload.get("subject", "Stock Report")
+    html_body = payload.get("html", "")
+
+    if not html_body:
+        return JSONResponse(
+            {"status": "error", "message": "Email body is empty."},
+            status_code=400,
+        )
+
+    # Always send to user + CC the admin address
+    recipients = [user_email]
+    admin_email = RECIPIENT_EMAIL  # abhinavkhaitan@gmail.com
+    if admin_email and admin_email.lower() != user_email.lower():
+        recipients.append(admin_email)
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": "Stock Digest <digest@vibeyvibey.com>",
+                    "to": recipients,
+                    "subject": subject,
+                    "html": html_body,
+                },
+                timeout=15.0,
+            )
+        if resp.status_code in (200, 201):
+            data = resp.json()
+            logger.info(f"Email sent for {username} to {recipients}: {data}")
+            return JSONResponse({"status": "ok", "id": data.get("id")})
+        else:
+            err = resp.text[:300]
+            logger.error(f"Resend API error: {resp.status_code} — {err}")
+            return JSONResponse(
+                {"status": "error", "message": f"Resend API error ({resp.status_code}): {err}"},
+                status_code=502,
+            )
+    except Exception as e:
+        logger.error(f"Email send failed for {username}: {e}")
+        return JSONResponse(
+            {"status": "error", "message": f"Failed to send email: {str(e)[:200]}"},
             status_code=500,
         )
 

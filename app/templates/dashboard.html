@@ -49,7 +49,7 @@
     </div>
 </div>
 
-<div class="flex items-center justify-between mb-6">
+<div class="flex items-center justify-between mb-4">
     <h1 class="text-2xl font-bold">{{ username }}'s Dashboard</h1>
     <div class="flex items-center gap-2">
         <button id="refresh-news-btn" onclick="refreshNews()"
@@ -61,6 +61,29 @@
             <span id="refresh-news-text">Refresh News</span>
         </button>
     </div>
+</div>
+
+<!-- User email -->
+<div class="flex items-center gap-2 mb-6 text-sm">
+    <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+    </svg>
+    <span id="email-display" class="text-gray-700 {% if not user_email %}hidden{% endif %}">
+        <span id="email-value">{{ user_email }}</span>
+    </span>
+    <span id="email-placeholder" class="text-gray-400 italic {% if user_email %}hidden{% endif %}">No email set</span>
+    <div id="email-edit-form" class="hidden items-center gap-2">
+        <input type="email" id="email-input"
+            class="px-2 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 w-64"
+            placeholder="you@example.com" value="{{ user_email }}">
+        <button onclick="saveEmail()" class="text-xs text-white bg-indigo-600 px-2.5 py-1 rounded-md hover:bg-indigo-700 transition">Save</button>
+        <button onclick="cancelEditEmail()" class="text-xs text-gray-500 hover:text-gray-700 transition">Cancel</button>
+    </div>
+    <button id="email-edit-btn" onclick="startEditEmail()" class="text-xs text-indigo-600 hover:text-indigo-800 transition font-medium">
+        {{ 'Edit' if user_email else 'Add' }}
+    </button>
+    <span id="email-save-status" class="text-xs"></span>
 </div>
 
 <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
@@ -135,6 +158,17 @@
                 </svg>
                 <span id="digest-btn-text">{{ 'Regenerate' if digest else 'Generate Digest' }}</span>
             </button>
+            {% if digest %}
+            <button id="send-email-btn" onclick="sendDigestEmail()"
+                class="text-sm px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 bg-white border border-gray-200 text-gray-600 hover:bg-gray-50">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                </svg>
+                <span id="send-email-btn-text">Send Email</span>
+            </button>
+            <span id="send-email-status" class="text-xs"></span>
+            {% endif %}
         </div>
     </div>
     <div id="digest-content" class="text-sm text-gray-700 leading-relaxed">
@@ -422,8 +456,9 @@ function toggleAddMode() {
     function escapeHtml(text) {
         const d = document.createElement('div'); d.textContent = text; return d.innerHTML;
     }
-    // Make it available globally for bulk mode too
+    // Make it available globally for bulk mode and email functions
     window._escapeHtml = escapeHtml;
+    window.escapeHtml = escapeHtml;
 
     searchInput.addEventListener('input', function() {
         clearSelection();
@@ -880,5 +915,138 @@ async function refreshNews() {
         el.innerHTML = formatDigest(el.dataset.raw);
     }
 })();
+
+// --- User Email ---
+function startEditEmail() {
+    document.getElementById('email-display').classList.add('hidden');
+    document.getElementById('email-placeholder').classList.add('hidden');
+    document.getElementById('email-edit-btn').classList.add('hidden');
+    document.getElementById('email-edit-form').classList.remove('hidden');
+    document.getElementById('email-edit-form').classList.add('flex');
+    document.getElementById('email-input').focus();
+}
+
+function cancelEditEmail() {
+    document.getElementById('email-edit-form').classList.add('hidden');
+    document.getElementById('email-edit-form').classList.remove('flex');
+    document.getElementById('email-edit-btn').classList.remove('hidden');
+    const current = document.getElementById('email-value').textContent.trim();
+    if (current) {
+        document.getElementById('email-display').classList.remove('hidden');
+    } else {
+        document.getElementById('email-placeholder').classList.remove('hidden');
+    }
+}
+
+async function saveEmail() {
+    const input = document.getElementById('email-input');
+    const email = input.value.trim();
+    const status = document.getElementById('email-save-status');
+    if (!email) { input.focus(); return; }
+
+    try {
+        const resp = await fetch('/api/email/set/{{ username }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+        });
+        const data = await resp.json();
+        if (data.status === 'ok') {
+            document.getElementById('email-value').textContent = email;
+            document.getElementById('email-display').classList.remove('hidden');
+            document.getElementById('email-placeholder').classList.add('hidden');
+            document.getElementById('email-edit-form').classList.add('hidden');
+            document.getElementById('email-edit-form').classList.remove('flex');
+            document.getElementById('email-edit-btn').textContent = 'Edit';
+            document.getElementById('email-edit-btn').classList.remove('hidden');
+            status.innerHTML = '<span class="text-green-600">✓ Saved</span>';
+            setTimeout(() => { status.innerHTML = ''; }, 2000);
+        } else {
+            status.innerHTML = '<span class="text-red-600">✗ ' + escapeHtml(data.message) + '</span>';
+        }
+    } catch (e) {
+        status.innerHTML = '<span class="text-red-600">✗ Network error</span>';
+    }
+}
+
+// --- Send Digest Email ---
+function _buildEmailHtml() {
+    const digestRaw = document.getElementById('digest-text')?.dataset?.raw || '';
+    const dashboardUrl = '{{ app_base_url }}/{{ username }}';
+    const username = '{{ username }}';
+
+    let digestHtml = '';
+    if (digestRaw) {
+        digestHtml = formatDigest(digestRaw);
+    } else {
+        return '';
+    }
+
+    return '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto;">' +
+        '<p style="font-size: 16px; color: #1e293b; margin-bottom: 16px;">Hi ' + escapeHtml(username) + ',</p>' +
+        '<h2 style="font-size: 20px; font-weight: 700; color: #1e293b; margin-bottom: 16px;">📊 Portfolio Digest</h2>' +
+        '<div style="color: #374151; line-height: 1.7; font-size: 14px;">' +
+            digestHtml +
+        '</div>' +
+        '<hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">' +
+        '<p style="font-size: 13px; color: #6b7280;">' +
+            'View the full dashboard: ' +
+            '<a href="' + dashboardUrl + '" style="color: #4f46e5; text-decoration: underline;">' + dashboardUrl + '</a>' +
+        '</p>' +
+    '</div>';
+}
+
+async function sendDigestEmail() {
+    const btn = document.getElementById('send-email-btn');
+    const btnText = document.getElementById('send-email-btn-text');
+    const status = document.getElementById('send-email-status');
+
+    // Check email is set
+    const userEmail = document.getElementById('email-value')?.textContent?.trim();
+    if (!userEmail) {
+        status.innerHTML = '<span class="text-red-600 font-medium">Please add your email first.</span>';
+        startEditEmail();
+        setTimeout(() => { status.innerHTML = ''; }, 4000);
+        return;
+    }
+
+    const htmlBody = _buildEmailHtml();
+    if (!htmlBody) {
+        status.innerHTML = '<span class="text-red-600 font-medium">No digest to send. Generate one first.</span>';
+        setTimeout(() => { status.innerHTML = ''; }, 4000);
+        return;
+    }
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const subject = dateStr + ' — Stock Report';
+
+    btn.disabled = true;
+    btnText.textContent = 'Sending…';
+    status.innerHTML = '';
+
+    try {
+        const resp = await fetch('/api/email/send/{{ username }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subject, html: htmlBody }),
+        });
+        const data = await resp.json();
+        if (data.status === 'ok') {
+            status.innerHTML = '<span class="text-green-600 font-medium">✓ Sent!</span>';
+            btnText.textContent = 'Send Email';
+            btn.disabled = false;
+            setTimeout(() => { status.innerHTML = ''; }, 5000);
+        } else {
+            status.innerHTML = '<span class="text-red-600 font-medium">✗ ' + escapeHtml(data.message || 'Unknown error') + '</span>';
+            btnText.textContent = 'Send Email';
+            btn.disabled = false;
+        }
+    } catch (e) {
+        status.innerHTML = '<span class="text-red-600 font-medium">✗ Network error — please try again.</span>';
+        btnText.textContent = 'Send Email';
+        btn.disabled = false;
+    }
+}
 </script>
 {% endblock %}

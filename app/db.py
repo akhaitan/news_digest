@@ -14,18 +14,36 @@ USE_PG = bool(DATABASE_URL)
 if USE_PG:
     import psycopg2
     import psycopg2.extras
+    import psycopg2.pool
+
+# ── Connection pool (PostgreSQL only) ─────────────────────────────────
+_pg_pool = None
+
+
+def _init_pg_pool():
+    """Initialise the PostgreSQL connection pool (called once from init_db)."""
+    global _pg_pool
+    if USE_PG and _pg_pool is None:
+        _pg_pool = psycopg2.pool.ThreadedConnectionPool(
+            minconn=2,
+            maxconn=10,
+            dsn=DATABASE_URL,
+        )
+        logger.info("PostgreSQL connection pool created (min=2, max=10)")
 
 
 @contextmanager
 def get_db():
-    """Return a database connection.
+    """Return a database connection from the pool (PG) or a fresh one (SQLite).
 
-    Yields a (conn, is_pg) tuple if PostgreSQL, or a plain conn for SQLite.
     Consumers should use the module-level helper functions rather than
     calling this directly.
     """
     if USE_PG:
-        conn = psycopg2.connect(DATABASE_URL)
+        # Ensure the pool is initialised (handles hot-reload edge cases)
+        if _pg_pool is None:
+            _init_pg_pool()
+        conn = _pg_pool.getconn()
         conn.autocommit = False
         try:
             yield conn
@@ -34,7 +52,7 @@ def get_db():
             conn.rollback()
             raise
         finally:
-            conn.close()
+            _pg_pool.putconn(conn)
     else:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -90,6 +108,7 @@ def _ph(n: int) -> str:
 # ── Schema initialisation ────────────────────────────────────────────
 
 def init_db():
+    _init_pg_pool()
     with get_db() as conn:
         if USE_PG:
             cur = conn.cursor()
@@ -179,6 +198,12 @@ def init_db():
                     model TEXT
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_emails (
+                    username TEXT PRIMARY KEY,
+                    email TEXT NOT NULL
+                )
+            """)
             cur.close()
         else:
             # SQLite schema
@@ -264,6 +289,11 @@ def init_db():
                     article_count INTEGER DEFAULT 0,
                     model TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS user_emails (
+                    username TEXT PRIMARY KEY,
+                    email TEXT NOT NULL
+                );
             """)
 
         for ticker, name in DEFAULT_STOCKS.items():
@@ -343,6 +373,21 @@ def get_all_recent_articles(hours: int = 24) -> list[dict]:
         )
 
 
+def get_articles_for_tickers(tickers: list[str], hours: int = 24) -> list[dict]:
+    """Fetch articles for multiple tickers in a single query."""
+    if not tickers:
+        return []
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    placeholders = _ph(len(tickers))
+    with get_db() as conn:
+        return _fetchall(conn,
+            f"""SELECT * FROM articles
+                WHERE ticker IN ({placeholders}) AND published_at >= {P}
+                ORDER BY published_at DESC""",
+            (*tickers, since),
+        )
+
+
 def get_stock_summary(hours: int = 24) -> list[dict]:
     since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     with get_db() as conn:
@@ -377,6 +422,93 @@ def get_user_stock_summary(username: str, hours: int = 24) -> list[dict]:
                 ORDER BY s.ticker""",
             (since, username),
         )
+
+
+def get_dashboard_data(username: str, hours: int = 72) -> dict:
+    """Fetch all data needed for the dashboard in a SINGLE database connection.
+
+    Returns a dict with keys: stocks, tickers, articles, read_ids, refresh_ts, digest, user_email.
+    """
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    with get_db() as conn:
+        # 0. User email
+        email_row = _fetchone(conn,
+            f"SELECT email FROM user_emails WHERE username = {P}",
+            (username,),
+        )
+        user_email = email_row["email"] if email_row else None
+
+        # 1. User tickers
+        ticker_rows = _fetchall(conn,
+            f"SELECT ticker FROM user_watchlists WHERE username = {P} ORDER BY ticker",
+            (username,),
+        )
+        tickers = [r["ticker"] for r in ticker_rows]
+
+        if not tickers:
+            return {
+                "stocks": [], "tickers": [], "articles": [],
+                "read_ids": set(), "refresh_ts": {}, "digest": None,
+                "user_email": user_email,
+            }
+
+        placeholders = _ph(len(tickers))
+
+        # 2. Stock summary (with article counts)
+        stocks = _fetchall(conn,
+            f"""SELECT s.ticker, s.name,
+                       COUNT(a.id) as article_count,
+                       SUM(CASE WHEN a.sentiment = 'positive' THEN 1 ELSE 0 END) as positive,
+                       SUM(CASE WHEN a.sentiment = 'negative' THEN 1 ELSE 0 END) as negative,
+                       SUM(CASE WHEN a.sentiment = 'neutral' OR a.sentiment IS NULL THEN 1 ELSE 0 END) as neutral
+                FROM user_watchlists w
+                JOIN stocks s ON w.ticker = s.ticker
+                LEFT JOIN articles a ON s.ticker = a.ticker AND a.published_at >= {P}
+                WHERE w.username = {P}
+                GROUP BY s.ticker, s.name
+                ORDER BY s.ticker""",
+            (since, username),
+        )
+
+        # 3. All articles for the user's tickers (single batch query)
+        articles = _fetchall(conn,
+            f"""SELECT * FROM articles
+                WHERE ticker IN ({placeholders}) AND published_at >= {P}
+                ORDER BY published_at DESC""",
+            (*tickers, since),
+        )
+
+        # 4. Read article IDs
+        read_rows = _fetchall(conn,
+            f"SELECT article_id FROM read_articles WHERE username = {P}",
+            (username,),
+        )
+        read_ids = {r["article_id"] for r in read_rows}
+
+        # 5. Refresh timestamps (news only)
+        refresh_ts: dict[str, dict] = {t: {"news_refresh": None} for t in tickers}
+        refresh_rows = _fetchall(conn,
+            f"SELECT ticker, last_refresh FROM refresh_log WHERE ticker IN ({placeholders})",
+            tuple(tickers),
+        )
+        for r in refresh_rows:
+            refresh_ts[r["ticker"]]["news_refresh"] = r["last_refresh"]
+
+        # 6. Cached digest
+        digest_row = _fetchone(conn,
+            f"SELECT digest_text, generated_at, article_count, model FROM portfolio_digests WHERE username = {P}",
+            (username,),
+        )
+
+    return {
+        "stocks": stocks,
+        "tickers": tickers,
+        "articles": articles,
+        "read_ids": read_ids,
+        "refresh_ts": refresh_ts,
+        "digest": digest_row,
+        "user_email": user_email,
+    }
 
 
 # ── User watchlists ──────────────────────────────────────────────────
@@ -674,13 +806,17 @@ def update_events_refresh_log(ticker: str):
         )
 
 
-def get_user_refresh_timestamps(username: str) -> dict[str, dict]:
-    """Get news and events refresh timestamps for all of a user's tickers."""
-    tickers = get_user_tickers(username)
+def get_user_refresh_timestamps(username: str, tickers: list[str] | None = None) -> dict[str, dict]:
+    """Get news refresh timestamps for all of a user's tickers.
+
+    If *tickers* is provided, skip the DB lookup for user tickers.
+    """
+    if tickers is None:
+        tickers = get_user_tickers(username)
     if not tickers:
         return {}
     placeholders = _ph(len(tickers))
-    result: dict[str, dict] = {t: {"news_refresh": None, "events_refresh": None} for t in tickers}
+    result: dict[str, dict] = {t: {"news_refresh": None} for t in tickers}
     with get_db() as conn:
         rows = _fetchall(conn,
             f"SELECT ticker, last_refresh FROM refresh_log WHERE ticker IN ({placeholders})",
@@ -688,12 +824,6 @@ def get_user_refresh_timestamps(username: str) -> dict[str, dict]:
         )
         for r in rows:
             result[r["ticker"]]["news_refresh"] = r["last_refresh"]
-        rows = _fetchall(conn,
-            f"SELECT ticker, last_refresh FROM events_refresh_log WHERE ticker IN ({placeholders})",
-            tuple(tickers),
-        )
-        for r in rows:
-            result[r["ticker"]]["events_refresh"] = r["last_refresh"]
     return result
 
 
@@ -746,4 +876,26 @@ def save_digest(username: str, digest_text: str, article_count: int, model: str)
                     article_count = EXCLUDED.article_count,
                     model = EXCLUDED.model""",
             (username, digest_text, now, article_count, model),
+        )
+
+
+# ── User Email ───────────────────────────────────────────────────────
+
+def get_user_email(username: str) -> str | None:
+    """Return the stored email for a user, or None."""
+    with get_db() as conn:
+        row = _fetchone(conn,
+            f"SELECT email FROM user_emails WHERE username = {P}",
+            (username,),
+        )
+        return row["email"] if row else None
+
+
+def set_user_email(username: str, email: str):
+    """Insert or update the email address for a user."""
+    with get_db() as conn:
+        _execute(conn,
+            f"""INSERT INTO user_emails (username, email) VALUES ({P}, {P})
+                ON CONFLICT(username) DO UPDATE SET email = EXCLUDED.email""",
+            (username, email),
         )
