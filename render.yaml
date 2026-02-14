@@ -11,6 +11,12 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RECIPIENT_EMAIL
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
       - key: PYTHON_VERSION
         value: "3.11"
 

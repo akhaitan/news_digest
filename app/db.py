@@ -899,3 +899,27 @@ def set_user_email(username: str, email: str):
                 ON CONFLICT(username) DO UPDATE SET email = EXCLUDED.email""",
             (username, email),
         )
+
+
+def get_all_usernames() -> list[str]:
+    """Return all distinct usernames that have a watchlist."""
+    with get_db() as conn:
+        rows = _fetchall(conn,
+            "SELECT DISTINCT username FROM user_watchlists ORDER BY username",
+        )
+        return [r["username"] for r in rows]
+
+
+def get_users_with_emails() -> list[dict]:
+    """Return all users who have both a watchlist and an email address set.
+
+    Returns list of dicts with keys: username, email.
+    """
+    with get_db() as conn:
+        return _fetchall(conn,
+            f"""SELECT DISTINCT w.username, e.email
+                FROM user_watchlists w
+                JOIN user_emails e ON w.username = e.username
+                WHERE e.email IS NOT NULL AND e.email != ''
+                ORDER BY w.username""",
+        )
